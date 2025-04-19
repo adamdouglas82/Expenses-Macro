@@ -1,5 +1,5 @@
 Attribute VB_Name = "ExpensifyAPIModule"
-Function expensifyAPIRequest(requestType, reportID, userID, userSecret, url, reportName, policyID, Optional reDownload, Optional useFees, Optional defaultFees)
+Function expensifyAPIRequest(requestType, reportID, userID, userSecret, url, reportName, policyID)
 
 Dim postdata As String
 Dim httpRequest As Object
@@ -144,12 +144,6 @@ ElseIf requestType = "policyGet" Then
  ElseIf requestType = "policyUpdate" Then
     Debug.Print "Updating Policy info in Expensify..."
     
-    If useFees = "Yes" Then
-        useFees = ",{""name"": ""Fees"",""type"":""text"",""setRequired"": false,""defaultValue"":""" & defaultFees & """}" & "]}}"
-    Else
-        useFees = "]}}"
-    End If
-    
     ' Get the Policy Categories and reportFields
     fileType = "csv"
     postdata = "requestJobDescription=" & "{""type"":""update""," _
@@ -176,8 +170,7 @@ ElseIf requestType = "policyGet" Then
                                             & "{""name"": ""System Type"",""type"":""dropdown"",""setRequired"": false,""values"":[""Artifact"",""ESL193fx"",""ESL193HE"",""ESL193UC"",""ESL213"",""ESLfemto"",""imageBIO"",""imageGEO"",""LaserSC"",""Lumen"",""MicroMill"",""MIR10"",""Other"",""n / a""]}," _
                                             & "{""name"": ""Serial Number"",""type"":""text"",""setRequired"": false}," _
                                             & "{""name"": ""Company"",""type"":""dropdown"",""setRequired"": false,""values"":[""Elemental Scientific Glassblowing"",""Elemental Scientific Inc."",""Elemental Scientific Instruments Ltd."",""Elemental Scientific Lasers LLC""],""defaultValue"":""Elemental Scientific Lasers LLC""}" _
-                                            & useFees
-
+                                            & "]}}"
 
 End If
 
@@ -221,6 +214,7 @@ If httpRequest.Status = 200 Then
   
   ElseIf requestType = "policyUpdate" Then
   expensifyAPIRequest = expensifyRequestReturn
+   Debug.Print httpRequest.statusText
    Debug.Print "Request successful! Policy info has been updated!"
   
   ElseIf requestType = "checkReimbursed" Then

@@ -35,7 +35,6 @@ Function expensesConversionDataArr(reportsResult, dataArr, wkNr, customer, name,
   Dim i As Long, j As Long, csvrow As Long, csvcol As Long
   Dim headerValue As String
   Dim env As Variant
-  Dim templatePath As String
   Dim lastBackslash As String
   Dim directoryPath As String
   Dim expenseType As String
@@ -169,18 +168,16 @@ Function expensesConversionDataArr(reportsResult, dataArr, wkNr, customer, name,
   
   'Get Report ID from Array
   reportID = dataArr(2, reportIDCol)
-   
-  ' get template path
-  templatePath = expensesDir & ESLExpenseTemp
 
-  'find last backslash in templatePath
-  lastBackslash = InStrRev(templatePath, "\")
+
+  'find last backslash in ESLExpenseTemp
+  lastBackslash = InStrRev(ESLExpenseTemp, "\")
 
   ' Extract the directory path by taking everything up to the last backslash
-  directoryPath = Left(templatePath, lastBackslash)
+  directoryPath = Left(ESLExpenseTemp, lastBackslash)
   
   ' Create new workbook from template
-  Set wbNew = Workbooks.Add(template:=templatePath)
+  Set wbNew = Workbooks.Add(template:=ESLExpenseTemp)
   wbNew.Queries.FastCombine = True ' Enable Fast Combine to bypass privacy checks
   Set wsOutput = wbNew.Sheets("Sheet1")
   Set wsMileage = wbNew.Sheets("Mileage")
@@ -297,17 +294,64 @@ Function expensesConversionDataArr(reportsResult, dataArr, wkNr, customer, name,
     wsOutput.Range("E" & outputRow).Value = dataArr(dataRow, notesCol) ' Meals / Notes
 
     ' Map expense type to category based on names in target sheet
+    MatchFound = False
     expenseType = dataArr(dataRow, catCol) ' column containing the expense type
     For col = 6 To 14 ' Loop through category name cells (F16:N16)
       If expenseType = wsOutput.Range(Cells(16, col).Address) Then ' Check for matching expense type
         wsOutput.Range(Cells(outputRow, col).Address) = dataArr(dataRow, expamtCol) ' Write expense amount to category column
+        MatchFound = True
         Exit For ' Exit loop after finding a match
+
       End If
+      
     Next col
+      
+      ' write to the "Other" category to avoid missing
+      If Not MatchFound Then
+      
+            ' Define the base URL structure - NOTE THE DOUBLE QUOTES needed for VBA strings!
+            baseURL = "https://www.expensify.com/report?param={""pageReportID"":""" & reportID & """,""keepCollection"":true}"
+
+            ' Prepare the message box
+            msgText = "Expense " & dataArr(dataRow, dateCol) & " - " & dataArr(dataRow, descCol) & " - " & dataArr(dataRow, expamtCol) & dataArr(dataRow, expCurrCol) & " was not matched." & vbCrLf & vbCrLf & _
+                      "Do you want to stop processing (ID: " & reportID & ") and open the Expensify report in your browser to categorize it now?" & vbCrLf & vbCrLf & _
+                      "Clicking No will assign it to ""Other"""
+            msgTitle = "Unmatched Category"
+            msgButtons = vbQuestion + vbYesNo + vbDefaultButton1 ' Yes/No question, default to No
+
+            ' Show the message box and get the user's response
+            msgResult = MsgBox(msgText, msgButtons, msgTitle)
+
+            ' Act based on the response
+            If msgResult = vbYes Then
+                ' User wants to open the link
+                Debug.Print "User chose Yes. Opening URL for Report ID " & reportID & " and closing ESL Report"
+                On Error Resume Next ' Handle errors opening the hyperlink (e.g., browser issues)
+                wbNew.Close SaveChanges:=False ' Close wbNew, discard changes
+                ThisWorkbook.FollowHyperlink Address:=baseURL
+                If Err.Number <> 0 Then
+                     MsgBox "Could not open the Expensify link in your browser." & vbCrLf & _
+                            "URL: " & baseURL & vbCrLf & "Error: " & Err.Description, vbExclamation, "Hyperlink Error"
+                     Err.Clear
+                     ' Decide: Write to "Other" if link fails?
+                     ' wsOutput.Cells(outputRow, 10).Value = expAmount
+                End If
+                On Error GoTo 0
+                 ' Typically, if they open the link, you DON'T write to "Other" here.
+                 ' The value is effectively deferred pending user action in Expensify.
+                expensesConversionDataArr = False
+                Exit Function
+            Else
+                ' User chose No - Decide what to do. Write to "Other" or skip?
+                Debug.Print "User chose No. Expense type '" & expenseType & "' (Report ID: " & reportID & ") placed in Other."
+                wsOutput.Cells(outputRow, 10).Value = expAmount ' Write to "Other" (Col J) if user clicks No
+            End If
+      End If
+
     
-    ' Check if currency matches report currency
-      If dataArr(dataRow, expCurrCol) <> dataArr(2, repCurrCol) And IsNumeric(dataArr(dataRow, feesCol)) And dataArr(dataRow, feesCol) <> 0 Then
-        wsOutput.Range("S" & outputRow).Formula = "=ROUND(O" & outputRow & "*(" & dataArr(dataRow, feesCol) & "/100)*Q" & outputRow & ",2)"
+    ' Check if currency matches report currency and calculate fees
+      If dataArr(dataRow, expCurrCol) <> dataArr(2, repCurrCol) And IsNumeric(defaultFees) And defaultFees <> 0 Then
+        wsOutput.Range("S" & outputRow).Formula = "=ROUND(O" & outputRow & "*(" & defaultFees & "/100)*Q" & outputRow & ",2)"
       End If
     
     ' Increment Output Row Counter
@@ -367,5 +411,5 @@ Function expensesConversionDataArr(reportsResult, dataArr, wkNr, customer, name,
   ' Directly Save, delete any present file
   If Dir(saveDirectory & reportName & ".xlsx") <> "" Then Kill (saveDirectory & reportName & ".xlsx")
   ActiveWorkbook.SaveAs fileName:=saveDirectory & reportName & ".xlsx", FileFormat:=xlOpenXMLWorkbook
-
+  expensesConversionDataArr = True
 End Function

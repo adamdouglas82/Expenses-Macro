@@ -21,13 +21,10 @@ Option Explicit
 ' v8.1 (250419) - Calculate fees based on Settings not Expensify Report
 ' v8.2 (250419) - If expense not categorised send user to Expensify Report or assign to Other
 ' v8.3 (250419) - Include line in Log to show that report needs updating to process
-
+' v8.4 (250419) - Add Summary Email Support
 
 ' Todo
 ' - check settings have been applied to Expensify correctly after initial onboarding
-' - prevent crash if no reimbursed reports
-' - only create one email option - put details and file names in to an array, then loop through array to populate email
-' - create settings form
 ' - Create new sheet for new year
 ' - End of year overview report for Chris
 ' - Dashboard on sheet 1
@@ -65,7 +62,7 @@ Dim wbLog As Workbook, wbOutput As Workbook
 Dim wsLog As Worksheet, wsOutput As Worksheet
 Dim feesTotal As Double
 Dim mileagePayout As Double
-Dim checkCell As Double
+Dim checkCell As Variant
 Dim repCurr As String
 Dim expsIntChoice As String
 Dim filePicker As Object
@@ -85,7 +82,7 @@ Dim mappedCategory As String
 Dim foundRow As Range
 Dim previousYear As Integer
 Dim reportTotal As Double
-Dim ESLTotal As Double ' Value from log file Column G (ESLTotal)
+Dim eslTotal As Double ' Value from log file Column G (ESLTotal)
 Dim searchLastRow As Long    ' Last row in log for searching
 Dim skipProcessing As Boolean ' Flag to skip processing current archived report
 Dim allowedDifference As Double ' Calculated difference between ESL and Expensify Totals based on set tolerance
@@ -93,7 +90,9 @@ Dim numReimbursedReports As Integer ' Number of Reimbursed Reports in array
 Dim numArchivedReports As Integer ' Number of Submistted Reports in array
 Dim numProcessedReports As Integer ' Current Report Number processing
 Dim conversionSuccessful As Boolean
-
+Dim emailDataCollection As New Collection ' To store data for summary email
+Dim reportInfo As Variant ' Temporary array to hold data for one report
+Dim singleReportData As Variant ' Declare as Variant to hold the array from the collection
 
  If expensesDir = "" Then
 
@@ -154,7 +153,7 @@ Start: ' Jump to here to re run after changing request type
 'requestType = "csv"
 'requestType = "PDF"
 'requestType = "policyList"
-'requestType = "policyGet"
+requestType = "policyGet"
 'requestType = "policyUpdate"
 'requestType = "combinedReports"
 
@@ -281,28 +280,28 @@ ElseIf requestType = "combinedReports" Then
             If foundRow.Offset(0, 10).Value = "Reimbursed" Then
               foundRow.Offset(0, 10).Value = "Submitted"
             End If
-            ESLTotal = 0 ' Default
+            eslTotal = 0 ' Default
             On Error Resume Next ' Handle non-numeric value in Col G
-            ESLTotal = CDbl(foundRow.Offset(0, 5).Value) ' Column G is 5 cols offset from B
+            eslTotal = CDbl(foundRow.Offset(0, 5).Value) ' Column G is 5 cols offset from B
             If Err.Number <> 0 Then
                 Debug.Print "      Warning: Could not convert value '" & foundRow.Offset(0, 5).Value & "' in log cell F" & foundRow.Row & " to a number."
                 Err.Clear
-                ESLTotal = -888888.88 ' Use a value guaranteed not to match
+                eslTotal = -888888.88 ' Use a value guaranteed not to match
             End If
             On Error GoTo 0
 
             ' Compare totals
             allowedDifference = Abs(reportTotal * tolerance / 100)
             
-            If Abs(ESLTotal - reportTotal) <= allowedDifference Then
+            If Abs(eslTotal - reportTotal) <= allowedDifference Then
                 ' MATCH FOUND! Report ID exists and total matches. Skip processing.
-                Debug.Print "      MATCH: ESL Total (" & ESLTotal & ") matches Expensify Total (" & reportTotal & "). Skipping processing."
+                Debug.Print "      MATCH: ESL Total (" & eslTotal & ") matches Expensify Total (" & reportTotal & "). Skipping processing."
                 Application.StatusBar = "Submitted Report " & reportID & " already verified in log. Skipping."
 
                 skipProcessing = True ' *** Set flag to skip ***
             Else
                 ' MISMATCH: Report ID found, but total is different. Continue processing.
-                Debug.Print "      MISMATCH: ESL Total (" & ESLTotal & ") differs from Expensify Total (" & reportTotal & "). Will re-process."
+                Debug.Print "      MISMATCH: ESL Total (" & eslTotal & ") differs from Expensify Total (" & reportTotal & "). Will re-process."
                 Application.StatusBar = "Submitted Report " & reportID & " found in log, but TOTAL MISMATCH. Re-processing."
                 ' Optional: Highlight the row in the log
                 ' foundRow.EntireRow.Interior.Color = vbYellow
@@ -434,11 +433,22 @@ ElseIf requestType = "combinedReports" Then
         
         'Send Email if required
         
-        If createEmail = "Individual" Then
-        Application.StatusBar = "Creating Email..."
-        Debug.Print "Creating Email..."
-        Call Send_Email(wkNr, customer, reasonForTrip, systemType, saveDirectory, reportName, serialNumber, name)
-        End If 'Email If
+'        If createEmail = "Individual" Then
+'        Application.StatusBar = "Creating Email..."
+'        Debug.Print "Creating Email..."
+'        Call Send_Email(wkNr, customer, reasonForTrip, systemType, saveDirectory, reportName, serialNumber, name)
+'        End If
+
+
+        ' Collect Email Data
+          If createEmail = "Summary" Or createEmail = "Individual" Then
+          ' Store the necessary details for this report in a temporary array
+          reportInfo = Array(wkNr, customer, reasonForTrip, systemType, saveDirectory, reportName, serialNumber, name, checkCell, repCurr)
+          ' Add this report's data array to the collection
+          emailDataCollection.Add reportInfo
+          End If
+        
+
       Else
         ' --- FAILURE or EARLY EXIT ---
         ' The function did NOT complete successfully. The workbook was likely closed
@@ -465,6 +475,28 @@ ElseIf requestType = "combinedReports" Then
     End If
   End If
   Next i
+  
+    If emailDataCollection.Count > 0 Then ' Check if any emails need sending
+        If createEmail = "Summary" Then
+            Application.StatusBar = "Creating Summary Email..."
+            Debug.Print "Creating Summary Email for " & emailDataCollection.Count & " reports..."
+            Call Send_Summary_Email(emailDataCollection) ' Call the summary sub from SendEmailModule
+    
+        ElseIf createEmail = "Individual" Then
+            Application.StatusBar = "Creating Individual Emails..."
+            Debug.Print "Creating " & emailDataCollection.Count & " individual emails..."
+            ' Loop through the collected data
+            For Each singleReportData In emailDataCollection
+                 ' Call the ORIGINAL Send_Email sub for each report's data
+                 ' Array order: (0:wkNr, 1:customer, 2:reasonForTrip, 3:systemType, 4:saveDirectory, 5:reportName, 6:serialNumber, 7:name)
+                 Call Send_Email(singleReportData(0), singleReportData(1), singleReportData(2), singleReportData(3), singleReportData(4), singleReportData(5), singleReportData(6), singleReportData(7), singleReportData(8), singleReportData(9))
+                 ' Optional: Yield processing time if Outlook gets overwhelmed
+                 DoEvents
+            Next singleReportData
+            Debug.Print "Finished creating " & emailDataCollection.Count & " individual emails."
+            Application.StatusBar = "Finished creating individual emails." ' Update status bar
+        End If
+    End If
   
     'Restart Onedrive
     If stopOneDrive = "TRUE" Then

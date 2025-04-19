@@ -19,6 +19,10 @@ Private Sub cboCreateEmail_Change()
 
 End Sub
 
+Private Sub chkAutoRun_Click()
+
+End Sub
+
 Private Sub chkMatchTol_Change()
 
 End Sub
@@ -50,7 +54,7 @@ Private Sub UserForm_Initialize()
         Dim itemArray As Variant
 
     ' Create an array of items
-    itemArray = Array("No", "Individual")
+    itemArray = Array("No", "Individual", "Summary")
 
     ' Assign the array to the ComboBox's List property
     Me.cboCreateEmail.List = itemArray
@@ -97,7 +101,7 @@ Private Sub cmdOK_Click()
 Dim startTime As Double
     ' Call the function in the module to save settings FROM THIS form instance (Me)
     If modSettings.SaveAllSettingsFromForm(Me) Then
-        modSettings.LoadSettingsIntoMemory
+        'modSettings.LoadSettingsIntoMemory
         Unload Me ' Close form only if save was successful
         Debug.Print "Settings Saved."
         Application.StatusBar = "Settings Saved!"
@@ -113,7 +117,7 @@ Dim startTime As Double
 End Sub
 
 Private Sub cmdCancel_Click()
-    modSettings.LoadSettingsIntoMemory
+    'modSettings.LoadSettingsIntoMemory
     Unload Me ' Close without saving changes made on the form
 End Sub
 
